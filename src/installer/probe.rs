@@ -5,7 +5,7 @@ use std::path::{Path, PathBuf};
 
 use dmidecode::bitfield::BitField;
 use dmidecode::{EntryPoint, Structure};
-use libblkid_rs::{BlkidProbe, BlkidSafeprobeRet};
+use libblkid_rs::BlkidProbe;
 use serde::{Deserialize, Serialize};
 use tokio::fs;
 use udev::{Device, Enumerator};
@@ -217,7 +217,7 @@ struct BlkidInfo {
 }
 
 impl BlkidInfo {
-    pub fn from_devnode<P: AsRef<Path>>(devnode: P) -> InstallerError<Self> {
+    pub fn from_devnode<P: AsRef<Path>>(devnode: P) -> InstallerResult<Self> {
         let file = File::open(devnode)?;
         let fd = file.as_raw_fd();
 
@@ -237,12 +237,16 @@ impl BlkidInfo {
         let mut part_label = probe.lookup_value("PARTLABEL").ok();
 
         // If direct tags are missing, ask the probed partition list.
-        if part_uuid.is_none() || part_label.is_none() {
-            if let Ok(parts) = probe.get_partitions() {
-                // For a partition device this list is usually about the attached partition context.
-                // The exact iterator methods depend on the crate version, so adapt this to the
-                // concrete API you have locally.
-                for part in parts {
+        if (part_uuid.is_none() || part_label.is_none())
+            && let Ok(mut parts) = probe.get_partitions()
+        {
+            // For a partition device this list is usually about the attached partition context.
+            // The exact iterator methods depend on the crate version, so adapt this to the
+            // concrete API you have locally.
+            let num_parts = parts.number_of_partitions()?;
+            if num_parts > 0 {
+                for part_idx in 0..num_parts {
+                    let part = parts.get_partition_by_partno(part_idx)?;
                     if part_uuid.is_none() {
                         part_uuid = part.get_uuid().ok().flatten().map(|u| u.to_string());
                     }
